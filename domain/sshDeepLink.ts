@@ -111,7 +111,11 @@ export const buildSshDeepLinkEphemeralHost = (
   options: SshDeepLinkDraftOptions,
 ): Host => ({
   ...buildSshDeepLinkHostDraft(target, options),
-  ...(target.password ? { password: target.password, authMethod: "password" as const } : {}),
+  ...(target.password ? {
+    password: target.password,
+    authMethod: "password" as const,
+    sftpUploadStrategy: "sequential" as const,
+  } : {}),
   savePassword: false,
   ephemeral: true,
   moshEnabled: false,
@@ -139,7 +143,11 @@ export const buildSshDeepLinkEphemeralHostFromSaved = (
   id: options.id,
   createdAt: options.now,
   ...(target.username ? { username: target.username } : {}),
-  ...(target.password ? { password: target.password, authMethod: "password" as const } : {}),
+  ...(target.password ? {
+    password: target.password,
+    authMethod: "password" as const,
+    sftpUploadStrategy: "sequential" as const,
+  } : {}),
   identityId: undefined,
   identityFileId: undefined,
   identityFilePaths: undefined,

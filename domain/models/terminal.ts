@@ -478,6 +478,8 @@ export interface TerminalSession {
    * the one-time credentials cannot survive a relaunch.
    */
   ephemeralHost?: boolean;
+  /** Runtime SFTP compatibility strategy inherited from an ephemeral Host. */
+  sftpUploadStrategy?: 'sequential';
   /** Runtime hint to auto-open a side panel once the session connects. */
   autoOpenSidePanel?: 'sftp';
   /** Latest known working directory captured from terminal cwd tracking. */

@@ -102,6 +102,22 @@ test("resolveTerminalSessionHost defaults missing saved remote sessions to SSH",
   assert.equal(resolved.os, "linux");
 });
 
+test("resolveTerminalSessionHost restores the session upload strategy without its ephemeral host", () => {
+  const resolved = resolveTerminalSessionHost({
+    session: {
+      ...baseSession,
+      ephemeralHost: true,
+      sftpUploadStrategy: "sequential",
+    },
+    hosts: [],
+    groupConfigs: [],
+    proxyProfiles,
+    localOs: "macos",
+  });
+
+  assert.equal(resolved.sftpUploadStrategy, "sequential");
+});
+
 test("resolveTerminalSessionHost keeps explicit missing local sessions local", () => {
   const resolved = resolveTerminalSessionHost({
     session: {

@@ -72,6 +72,7 @@ function buildFallbackHostFromSession(
     localShellName: session.localShellName,
     localShellIcon: session.localShellIcon,
     localStartDir: session.localStartDir,
+    sftpUploadStrategy: session.sftpUploadStrategy,
   };
 }
 

@@ -258,8 +258,9 @@ function createFileOpsApi(ctx) {
             return;
           }
     
-          // Use larger chunk size for better performance (256KB instead of 64KB)
-          const chunkSize = 262144;
+          const chunkSize = client.__netcattySftpUploadStrategy === "sequential"
+            ? TRANSFER_CHUNK_SIZE
+            : 256 * 1024;
           if (transferredBytes < totalBytes) {
             const end = Math.min(transferredBytes + chunkSize, totalBytes);
             // Use subarray instead of slice to avoid copying

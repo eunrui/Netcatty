@@ -81,7 +81,7 @@ test("getMissingChainHostIds reports unresolved jump hosts", () => {
   );
 });
 
-test("startSSH forwards custom ProxyCommand to the SSH bridge", async () => {
+test("startSSH infers sequential SFTP uploads for a JumpServer username", async () => {
   let capturedOptions: Record<string, unknown> | null = null;
   const terminalBackend = {
     backendAvailable: () => true,
@@ -110,7 +110,7 @@ test("startSSH forwards custom ProxyCommand to the SSH bridge", async () => {
       id: "host-1",
       label: "Target",
       hostname: "target.example.test",
-      username: "alice",
+      username: "JMS-token-id",
       port: 2200,
       proxyConfig: {
         type: "command",
@@ -161,6 +161,7 @@ test("startSSH forwards custom ProxyCommand to the SSH bridge", async () => {
     username: undefined,
     password: undefined,
   });
+  assert.equal(capturedOptions?.sftpUploadStrategy, "sequential");
 });
 
 test("startSSH resolves target proxy credentials from an identity", async () => {

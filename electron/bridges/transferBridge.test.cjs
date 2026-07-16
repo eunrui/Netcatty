@@ -47,6 +47,8 @@ test("SFTP uploads use conservative per-file request concurrency", async (t) => 
     },
   });
   const client = {
+    __netcattySessionBacked: true,
+    __netcattySftpUploadStrategy: undefined,
     sftp: createFastSftp({}),
     stat() {
       return Promise.resolve({ size: 1024 * 1024 });
@@ -75,6 +77,88 @@ test("SFTP uploads use conservative per-file request concurrency", async (t) => 
   assert.equal(result.error, undefined);
   assert.equal(observedConcurrency, 4);
   assert.equal(observedChunkSize, 32 * 1024);
+});
+
+test("explicit sequential transfer strategy preserves exact binary content", async (t) => {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-jms-upload-"));
+  t.after(async () => {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const localPath = path.join(tempDir, "archive.zip");
+  const payload = Buffer.alloc((96 * 1024) + 17);
+  for (let index = 0; index < payload.length; index++) {
+    payload[index] = index % 251;
+  }
+  await fs.promises.writeFile(localPath, payload);
+
+  let fastPutCalls = 0;
+  let inFlightWrites = 0;
+  let maxInFlightWrites = 0;
+  let remoteHandleClosed = false;
+  const remoteBytes = Buffer.alloc(payload.length);
+  const streamSftp = createFastSftp({
+    createWriteStream() {
+      throw new Error("sequential upload must not use createWriteStream");
+    },
+    open(_remotePath, flags, callback) {
+      assert.equal(flags, "w");
+      callback(null, Buffer.from("handle"));
+    },
+    write(_handle, buffer, offset, length, position, callback) {
+      inFlightWrites += 1;
+      maxInFlightWrites = Math.max(maxInFlightWrites, inFlightWrites);
+      setImmediate(() => {
+        buffer.copy(remoteBytes, position, offset, offset + length);
+        inFlightWrites -= 1;
+        callback(null);
+      });
+    },
+    close(_handle, callback) {
+      remoteHandleClosed = true;
+      callback(null);
+    },
+  });
+  const fastSftp = createFastSftp({
+    fastPut(_localPath, _remotePath, _options, done) {
+      fastPutCalls += 1;
+      done();
+    },
+  });
+  const client = {
+    // The worker proxy sends the strategy separately from this projected client.
+    __netcattySftpUploadStrategy: undefined,
+    sftp: streamSftp,
+    stat() {
+      return Promise.resolve({ size: remoteBytes.length });
+    },
+    client: {
+      sftp(callback) {
+        callback(null, fastSftp);
+      },
+    },
+  };
+  transferBridge.init({ sftpClients: new Map([["target", client]]) });
+
+  const result = await transferBridge.startTransfer(
+    { sender: createSender() },
+    {
+      transferId: "jms-upload",
+      sourcePath: localPath,
+      targetPath: "/tmp/archive.zip",
+      sourceType: "local",
+      targetType: "sftp",
+      targetSftpId: "target",
+      totalBytes: payload.length,
+      targetUploadStrategy: "sequential",
+    },
+  );
+
+  assert.equal(result.error, undefined);
+  assert.equal(fastPutCalls, 0);
+  assert.equal(maxInFlightWrites, 1);
+  assert.equal(remoteHandleClosed, true);
+  assert.deepEqual(remoteBytes, payload);
 });
 
 test("SFTP uploads fail when remote size does not match local size", async (t) => {

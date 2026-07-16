@@ -12,6 +12,7 @@ const path = require("node:path");
 const { promisify } = require("node:util");
 const { StringDecoder } = require("node:string_decoder");
 const { ensureNodePtySpawnHelperExecutable } = require("./nodePtySpawnHelperPermissions.cjs");
+const sftpUploadStrategyRegistry = require("./sftpUploadStrategyRegistry.cjs");
 
 ensureNodePtySpawnHelperExecutable();
 
@@ -1408,8 +1409,13 @@ function registerHandlers(ipcMain, options = {}) {
       "netcatty:resize",
       "netcatty:flow",
       "netcatty:flow:ack",
-      "netcatty:close",
     ].forEach((channel) => registerWorkerSend(ipcMain, terminalWorkerManager, channel));
+    ipcMain.on("netcatty:close", (event, payload) => {
+      sftpUploadStrategyRegistry.clearSessionStrategy(payload?.sessionId);
+      terminalWorkerManager.send("netcatty:close", payload, {
+        webContentsId: event?.sender?.id,
+      });
+    });
     return;
   }
   ipcMain.handle("netcatty:local:start", startLocalSession);

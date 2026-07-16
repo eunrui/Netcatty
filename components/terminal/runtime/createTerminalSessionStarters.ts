@@ -523,6 +523,10 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
           verifyHostKeys: globalTerminalSettings.verifyHostKeys,
           sessionLog: ctx.sessionLog?.enabled ? ctx.sessionLog : undefined,
           sshDebugLogEnabled: ctx.sshDebugLogEnabled,
+          sftpUploadStrategy: ctx.host.sftpUploadStrategy === "sequential"
+            || effectiveUsername.startsWith("JMS-")
+            ? "sequential"
+            : undefined,
           identityFilePaths: attempt.useIdentityFiles ? targetIdentityFilePaths : undefined,
           knownHosts: ctx.knownHosts,
           sudoAutofillPassword: resolveSavedSudoAutofillPassword(),

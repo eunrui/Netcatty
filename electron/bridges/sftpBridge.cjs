@@ -43,6 +43,9 @@ const {
   buildSftpAlgorithms,
   _resetAlgorithmSupportCacheForTests,
 } = require("./sshAlgorithms.cjs");
+const { TRANSFER_CHUNK_SIZE } = require("./transferLimits.cjs");
+const { writeSftpSequentially } = require("./sequentialSftpWriter.cjs");
+const sftpUploadStrategyRegistry = require("./sftpUploadStrategyRegistry.cjs");
 
 // SFTP clients storage - shared reference passed from main
 let sftpClients = null;
@@ -666,6 +669,9 @@ function createSessionBackedSftpClient(sessionId, sshClient, options = {}) {
     client: sshClient,
     sftp: null,
     __netcattySessionBacked: true,
+    __netcattySftpUploadStrategy: options?.sftpUploadStrategy === "sequential"
+      ? "sequential"
+      : undefined,
     __netcattySourceSessionId: options?.sourceSessionId,
     __netcattyRefHolder: refHolder,
     _reopeningPromise: null,
@@ -678,6 +684,19 @@ function createSessionBackedSftpClient(sessionId, sshClient, options = {}) {
       const sftp = await requireSftpChannel(client);
       const signal = options?.signal || null;
       throwIfAborted(signal);
+      if (client.__netcattySftpUploadStrategy === "sequential") {
+        const chunks = content && typeof content.pipe === "function"
+          ? content
+          : [Buffer.isBuffer(content) ? content : Buffer.from(content)];
+        await writeSftpSequentially({
+          sftp,
+          remotePath,
+          chunks,
+          chunkSize: TRANSFER_CHUNK_SIZE,
+          signal,
+        });
+        return true;
+      }
       if (content && typeof content.pipe === "function") {
         const stream = sftp.createWriteStream(remotePath);
         await pipeStreams(content, stream, signal);
@@ -689,7 +708,10 @@ function createSessionBackedSftpClient(sessionId, sshClient, options = {}) {
         let offset = 0;
         while (offset < buffer.length) {
           throwIfAborted(signal);
-          const length = Math.min(256 * 1024, buffer.length - offset);
+          const chunkSize = client.__netcattySftpUploadStrategy === "sequential"
+            ? TRANSFER_CHUNK_SIZE
+            : 256 * 1024;
+          const length = Math.min(chunkSize, buffer.length - offset);
           await writeFileChunkAsync(sftp, handle, buffer, offset, length, offset);
           offset += length;
         }
@@ -782,6 +804,7 @@ async function openSftpForSession(_event, payload) {
   const client = createSessionBackedSftpClient(sessionId, sshClient, {
     refHolder,
     sourceSessionId: sessionId,
+    sftpUploadStrategy: resolveSessionSftpUploadStrategy(session),
   });
   try {
     await requireSftpChannel(client, {
@@ -879,7 +902,10 @@ function sendSftpProgress(sender, sessionId, label, status, detail) {
 /**
  * Connect through a chain of jump hosts for SFTP
  */
-const { createOpenConnectionApi } = require("./sftpBridge/openConnection.cjs");
+const {
+  createOpenConnectionApi,
+  resolveSessionSftpUploadStrategy,
+} = require("./sftpBridge/openConnection.cjs");
 const {
   acquireConnectionRef,
   releaseConnectionRef,
@@ -907,6 +933,7 @@ const fileOpsApi = createFileOpsApi({
   get sftpClients() { return sftpClients; },
   get electronModule() { return electronModule; },
   activeSftpUploads, fileWatcherBridge, fs, path, Buffer, console, setTimeout, clearTimeout,
+  TRANSFER_CHUNK_SIZE,
   jumpConnectionsMap, sftpEncodingState, normalizeEncoding, isAsciiString,
   requireSftpChannel, resolveEncodingForRequest, updateResolvedEncoding, encodePath, decodeName,
   detectEncodingFromList, statResultFromAttrs, normalizeRemotePathString, collectReadable, writeToWritable,
@@ -945,9 +972,33 @@ function registerWorkerHandle(ipcMain, terminalWorkerManager, channel) {
 function registerHandlers(ipcMain, options = {}) {
   const terminalWorkerManager = options.terminalWorkerManager || null;
   if (terminalWorkerManager) {
+    const registerOpenHandler = (channel, getSourceSessionId) => {
+      ipcMain.handle(channel, async (event, payload) => {
+        const strategy = sftpUploadStrategyRegistry.normalizeStrategy(payload?.sftpUploadStrategy)
+          || sftpUploadStrategyRegistry.getSessionStrategy(getSourceSessionId(payload));
+        const forwardedPayload = strategy
+          ? { ...payload, sftpUploadStrategy: strategy }
+          : payload;
+        const result = await terminalWorkerManager.request(channel, forwardedPayload, {
+          webContentsId: event?.sender?.id,
+        });
+        sftpUploadStrategyRegistry.setSftpStrategy(result?.sftpId, strategy);
+        return result;
+      });
+    };
+
+    registerOpenHandler("netcatty:sftp:open", (payload) => payload?.sourceSessionId);
+    registerOpenHandler("netcatty:sftp:openForSession", (payload) => payload?.sessionId);
+    ipcMain.handle("netcatty:sftp:close", async (event, payload) => {
+      try {
+        return await terminalWorkerManager.request("netcatty:sftp:close", payload, {
+          webContentsId: event?.sender?.id,
+        });
+      } finally {
+        sftpUploadStrategyRegistry.clearSftpStrategy(payload?.sftpId);
+      }
+    });
     [
-      "netcatty:sftp:open",
-      "netcatty:sftp:openForSession",
       "netcatty:sftp:list",
       "netcatty:sftp:read",
       "netcatty:sftp:readBinary",
@@ -957,7 +1008,6 @@ function registerHandlers(ipcMain, options = {}) {
       "netcatty:sftp:downloadToLocal",
       "netcatty:sftp:uploadLocal",
       "netcatty:sftp:cancelUpload",
-      "netcatty:sftp:close",
       "netcatty:sftp:mkdir",
       "netcatty:sftp:delete",
       "netcatty:sftp:rename",

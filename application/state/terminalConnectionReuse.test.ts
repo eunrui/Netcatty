@@ -64,6 +64,19 @@ test("session clones preserve the ephemeral-host marker", () => {
   );
 });
 
+test("session clones preserve the SFTP upload strategy", () => {
+  const source = session({ sftpUploadStrategy: "sequential" });
+
+  assert.equal(
+    createSplitTerminalSessionClone(source, { id: "split-jms" }).sftpUploadStrategy,
+    "sequential",
+  );
+  assert.equal(
+    createCopiedTerminalSessionClone(source, { id: "copy-jms" }).sftpUploadStrategy,
+    "sequential",
+  );
+});
+
 test("copy session clones reuse SSH sources and preserve serial config", () => {
   const copied = createCopiedTerminalSessionClone(
     session({

@@ -144,6 +144,7 @@ test("buildJmsDeepLinkEphemeralHost builds password ssh host with mosh and et di
   assert.equal(host.protocol, "ssh");
   assert.equal(host.moshEnabled, false);
   assert.equal(host.ephemeral, true);
+  assert.equal(host.sftpUploadStrategy, "sequential");
   assert.equal(host.etEnabled, false);
   assert.equal(host.createdAt, 456);
   assert.equal(host.autoOpenSftpPanel, undefined);

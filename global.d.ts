@@ -128,6 +128,8 @@ declare global {
     sessionLog?: { enabled: boolean; directory: string; format: string; timestampsEnabled?: boolean };
     // SSH connection diagnostics. Does not capture terminal output.
     sshDebugLogEnabled?: boolean;
+    // Use ordered SFTP writes for compatibility with the current transport.
+    sftpUploadStrategy?: "sequential";
     // Local SSH key file paths (from SSH config IdentityFile)
     identityFilePaths?: string[];
     // When set, reuse the already-authenticated SSH connection of this existing

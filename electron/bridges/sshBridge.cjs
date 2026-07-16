@@ -50,6 +50,7 @@ const { enableSshNoDelay, enableTcpNoDelay } = require("./tcpNoDelay.cjs");
 const {
   configureTerminalSessionDataEmitter,
 } = require("./emitTerminalSessionData.cjs");
+const sftpUploadStrategyRegistry = require("./sftpUploadStrategyRegistry.cjs");
 
 // Default SSH key names in priority order (preferred keys tried first)
 const PREFERRED_KEY_NAMES = ["id_ed25519", "id_ecdsa", "id_rsa"];
@@ -1206,8 +1207,20 @@ function registerWorkerHandle(ipcMain, terminalWorkerManager, channel) {
 function registerHandlers(ipcMain, options = {}) {
   const terminalWorkerManager = options.terminalWorkerManager || null;
   if (terminalWorkerManager) {
+    ipcMain.handle("netcatty:start", async (event, payload) => {
+      const sessionId = payload?.sessionId;
+      const strategy = sftpUploadStrategyRegistry.inferSessionStrategy(payload);
+      sftpUploadStrategyRegistry.setSessionStrategy(sessionId, strategy);
+      try {
+        return await terminalWorkerManager.request("netcatty:start", payload, {
+          webContentsId: event?.sender?.id,
+        });
+      } catch (err) {
+        sftpUploadStrategyRegistry.clearSessionStrategy(sessionId);
+        throw err;
+      }
+    });
     [
-      "netcatty:start",
       "netcatty:ssh:exec",
       "netcatty:ssh:pwd",
       "netcatty:ssh:remoteInfo",

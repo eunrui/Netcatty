@@ -53,6 +53,14 @@ function createStartSessionApi(ctx) {
       chainConnections,
       isReused,
     }) {
+      const sftpUploadStrategy = options.sftpUploadStrategy === 'sequential'
+        || (typeof options.username === 'string' && options.username.startsWith('JMS-'))
+        || conn?.__netcattySftpUploadStrategy === 'sequential'
+        ? 'sequential'
+        : undefined;
+      if (conn && sftpUploadStrategy) {
+        conn.__netcattySftpUploadStrategy = sftpUploadStrategy;
+      }
       const session = {
         conn,
         stream,
@@ -66,6 +74,7 @@ function createStartSessionApi(ctx) {
         hostname: options.host || options.hostname || '',
         username: options.username || '',
         label: options.label || '',
+        sftpUploadStrategy,
         systemManagerSudoPassword: typeof options.sudoAutofillPassword === 'string' && options.sudoAutofillPassword.length > 0
           ? options.sudoAutofillPassword
           : undefined,

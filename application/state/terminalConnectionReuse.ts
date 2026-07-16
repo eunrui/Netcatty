@@ -47,6 +47,7 @@ function createTerminalSessionClone(
     fontSize: session.fontSize,
     fontSizeOverride: session.fontSizeOverride,
     ...(session.ephemeralHost ? { ephemeralHost: true } : {}),
+    ...(session.sftpUploadStrategy ? { sftpUploadStrategy: session.sftpUploadStrategy } : {}),
     reuseConnectionFromSessionId: canReuseTerminalConnection(session) ? session.id : undefined,
   };
 

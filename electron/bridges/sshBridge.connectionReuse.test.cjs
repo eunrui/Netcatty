@@ -168,6 +168,7 @@ test("Copy Tab reuses the source connection instead of dialing fresh", async (t)
       username: "alice",
       port: 22,
       sourceSessionId: "source",
+      sftpUploadStrategy: "sequential",
     },
   );
 
@@ -181,6 +182,8 @@ test("Copy Tab reuses the source connection instead of dialing fresh", async (t)
   assert.ok(copy, "copy session should be registered");
   assert.equal(copy.conn, sourceConn);
   assert.equal(copy.connRef.count, 2);
+  assert.equal(copy.sftpUploadStrategy, "sequential");
+  assert.equal(sourceConn.__netcattySftpUploadStrategy, "sequential");
 
   // A 'connected' progress event was emitted for the renderer.
   const progress = sender.sent.filter((m) => m.channel === "netcatty:chain:progress");

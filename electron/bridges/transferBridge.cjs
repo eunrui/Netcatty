@@ -8,6 +8,8 @@ const path = require("node:path");
 const os = require("node:os");
 const { encodePathForSession, ensureRemoteDirForSession, requireSftpChannel, resolveEncodingForRequest } = require("./sftpBridge.cjs");
 const { TRANSFER_CHUNK_SIZE, TRANSFER_CONCURRENCY } = require("./transferLimits.cjs");
+const { writeSftpSequentially } = require("./sequentialSftpWriter.cjs");
+const sftpUploadStrategyRegistry = require("./sftpUploadStrategyRegistry.cjs");
 
 /**
  * Verify a completed remote upload matches the expected byte count.
@@ -326,13 +328,47 @@ async function acquireIsolatedDownloadChannel(client, transfer) {
  * Upload a local file to SFTP using ssh2's fastPut (parallel SFTP requests).
  * Falls back to sequential stream piping if fastPut is unavailable.
  */
-async function uploadFile(localPath, remotePath, client, fileSize, transfer, sendProgress) {
+async function uploadFile(localPath, remotePath, client, fileSize, transfer, sendProgress, uploadStrategy) {
   await requireSftpChannel(client);
   const sftp = client.sftp;
   if (!sftp) throw new Error("SFTP client not ready");
 
-  // Prefer fastPut on an isolated SFTP channel so cancellation can abort just this transfer.
-  if (!client.__netcattySudoMode) {
+  // Compatibility-marked deep-link sessions can mishandle concurrent
+  // positioned writes while still reporting the expected final size.
+  const requiresSequentialUpload = uploadStrategy === "sequential"
+    || client.__netcattySftpUploadStrategy === "sequential";
+
+  if (requiresSequentialUpload) {
+    const readStream = fs.createReadStream(localPath, { highWaterMark: TRANSFER_CHUNK_SIZE });
+    const controller = new AbortController();
+    const abortSequentialTransfer = () => {
+      controller.abort(new Error("Transfer cancelled"));
+      try { readStream.destroy(); } catch { }
+    };
+    transfer.readStream = readStream;
+    transfer.abort = abortSequentialTransfer;
+
+    if (transfer.cancelled) abortSequentialTransfer();
+
+    try {
+      await writeSftpSequentially({
+        sftp,
+        remotePath,
+        chunks: readStream,
+        chunkSize: TRANSFER_CHUNK_SIZE,
+        signal: controller.signal,
+        onProgress: (written) => sendProgress(written, fileSize),
+      });
+    } finally {
+      if (transfer.abort === abortSequentialTransfer) transfer.abort = null;
+      if (transfer.readStream === readStream) transfer.readStream = null;
+    }
+
+    await assertRemoteUploadSize(client, remotePath, fileSize);
+    return;
+  }
+
+  if (!client.__netcattySudoMode && !requiresSequentialUpload) {
     let fastSftp = null;
     try {
       fastSftp = await openIsolatedSftpChannel(client);
@@ -570,6 +606,7 @@ async function startTransfer(event, payload, onProgress) {
     sourceEncoding,
     targetEncoding,
     sameHost,
+    targetUploadStrategy,
   } = payload;
   const sender = event.sender;
 
@@ -712,7 +749,15 @@ async function startTransfer(event, payload, onProgress) {
       try { await ensureRemoteDirForSession(targetSftpId, dir, targetEncoding); } catch { }
 
       const encodedTargetPath = encodePathForSession(targetSftpId, targetPath, targetEncoding);
-      await uploadFile(sourcePath, encodedTargetPath, client, fileSize, transfer, sendProgress);
+      await uploadFile(
+        sourcePath,
+        encodedTargetPath,
+        client,
+        fileSize,
+        transfer,
+        sendProgress,
+        targetUploadStrategy,
+      );
 
     } else if (sourceType === 'sftp' && targetType === 'local') {
       const client = sftpClients.get(sourceSftpId);
@@ -832,7 +877,15 @@ async function startTransfer(event, payload, onProgress) {
         const uploadProgress = (transferred) => {
           sendProgress(Math.floor(fileSize / 2) + Math.floor(transferred / 2), fileSize);
         };
-        await uploadFile(tempPath, encodedTargetPath, targetClient, fileSize, transfer, uploadProgress);
+        await uploadFile(
+          tempPath,
+          encodedTargetPath,
+          targetClient,
+          fileSize,
+          transfer,
+          uploadProgress,
+          targetUploadStrategy,
+        );
 
         try { await fs.promises.unlink(tempPath); } catch { }
       }
@@ -955,8 +1008,17 @@ function registerWorkerHandle(ipcMain, terminalWorkerManager, channel) {
 function registerHandlers(ipcMain, options = {}) {
   const terminalWorkerManager = options.terminalWorkerManager || null;
   if (terminalWorkerManager) {
+    ipcMain.handle("netcatty:transfer:start", (event, payload) => {
+      const strategy = sftpUploadStrategyRegistry.normalizeStrategy(payload?.targetUploadStrategy)
+        || sftpUploadStrategyRegistry.getSftpStrategy(payload?.targetSftpId);
+      const forwardedPayload = strategy
+        ? { ...payload, targetUploadStrategy: strategy }
+        : payload;
+      return terminalWorkerManager.request("netcatty:transfer:start", forwardedPayload, {
+        webContentsId: event?.sender?.id,
+      });
+    });
     [
-      "netcatty:transfer:start",
       "netcatty:transfer:cancel",
       "netcatty:transfer:same-host-copy-dir",
     ].forEach((channel) => registerWorkerHandle(ipcMain, terminalWorkerManager, channel));

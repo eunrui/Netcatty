@@ -36,7 +36,7 @@ interface UseSftpHostCredentialsParams {
  * authenticated. Endpoint fields must match the session for findReusableSession.
  */
 export const buildSftpReuseCredentials = (
-  host: Pick<Host, "hostname" | "username" | "port">,
+  host: Pick<Host, "hostname" | "username" | "port" | "sftpUploadStrategy">,
   sourceSessionId: string,
 ): NetcattySSHOptions => ({
   hostname: host.hostname,
@@ -45,6 +45,7 @@ export const buildSftpReuseCredentials = (
   sourceSessionId,
   reuseOnly: true,
   sudo: false,
+  sftpUploadStrategy: host.sftpUploadStrategy,
 });
 
 export const buildSftpHostCredentials = ({
@@ -195,6 +196,7 @@ export const buildSftpHostCredentials = ({
     keepaliveCountMax: targetKeepalive.countMax,
     knownHosts,
     verifyHostKeys: globalTerminalSettings.verifyHostKeys,
+    sftpUploadStrategy: host.sftpUploadStrategy,
     // Algorithm settings — must reach the SFTP bridge or hosts that need
     // legacy mode / the ECDSA skip / advanced overrides would still hit
     // the original negotiation failure when opening their SFTP pane,

@@ -33,3 +33,12 @@ test("createHostTerminalSession keeps telnet deep-link default port for ssh host
   assert.equal(session.protocol, "telnet");
   assert.equal(session.port, 23);
 });
+
+test("createHostTerminalSession preserves the SFTP upload strategy", () => {
+  const session = createHostTerminalSession(
+    "session-jms",
+    host({ ephemeral: true, sftpUploadStrategy: "sequential" }),
+  );
+
+  assert.equal(session.sftpUploadStrategy, "sequential");
+});

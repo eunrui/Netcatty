@@ -17,9 +17,14 @@ const host = (overrides: Partial<Host> = {}): Host => ({
   ...overrides,
 });
 
-test("buildSftpReuseCredentials only needs the live endpoint and sourceSessionId", () => {
+test("buildSftpReuseCredentials preserves the live host upload strategy", () => {
   const credentials = buildSftpReuseCredentials(
-    host({ hostname: "live.example.com", username: "alice", port: 2222 }),
+    host({
+      hostname: "live.example.com",
+      username: "alice",
+      port: 2222,
+      sftpUploadStrategy: "sequential",
+    }),
     "session-live",
   );
 
@@ -30,6 +35,7 @@ test("buildSftpReuseCredentials only needs the live endpoint and sourceSessionId
     sourceSessionId: "session-live",
     reuseOnly: true,
     sudo: false,
+    sftpUploadStrategy: "sequential",
   });
 });
 

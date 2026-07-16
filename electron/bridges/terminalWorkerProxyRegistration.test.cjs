@@ -7,7 +7,12 @@ const sftpBridge = require("./sftpBridge.cjs");
 const transferBridge = require("./transferBridge.cjs");
 const compressUploadBridge = require("./compressUploadBridge.cjs");
 const fileWatcherBridge = require("./fileWatcherBridge.cjs");
+const sftpUploadStrategyRegistry = require("./sftpUploadStrategyRegistry.cjs");
 const { createSystemManagerBridge } = require("./systemManagerBridge.cjs");
+
+test.beforeEach(() => {
+  sftpUploadStrategyRegistry.resetForTests();
+});
 
 function createFakeIpcMain() {
   return {
@@ -173,6 +178,89 @@ test("terminal worker mode proxies SFTP and surrounding file operations", async 
       "netcatty:filewatch:registerTempFile",
     ],
   );
+});
+
+test("terminal worker mode propagates sequential uploads from a marked deep-link SSH session", async () => {
+  const ipcMain = createFakeIpcMain();
+  const terminalWorkerManager = createFakeWorkerManager();
+  terminalWorkerManager.request = function request(channel, payload, options) {
+    this.requests.push({ channel, payload, options });
+    if (channel === "netcatty:sftp:open") {
+      return Promise.resolve({ sftpId: "sftp-jms" });
+    }
+    return Promise.resolve({ ok: true, channel });
+  };
+
+  sshBridge.registerHandlers(ipcMain, { terminalWorkerManager });
+  terminalBridge.registerHandlers(ipcMain, { terminalWorkerManager });
+  sftpBridge.registerHandlers(ipcMain, { terminalWorkerManager });
+  transferBridge.registerHandlers(ipcMain, { terminalWorkerManager });
+
+  await ipcMain.handlers.get("netcatty:start")(fakeEvent, {
+    sessionId: "ssh-deep-link",
+    username: "appuser",
+    sftpUploadStrategy: "sequential",
+  });
+  await ipcMain.handlers.get("netcatty:sftp:open")(fakeEvent, {
+    sessionId: "sftp-request",
+    sourceSessionId: "ssh-deep-link",
+    reuseOnly: true,
+  });
+  await ipcMain.handlers.get("netcatty:transfer:start")(fakeEvent, {
+    transferId: "transfer-jms",
+    sourceType: "local",
+    targetType: "sftp",
+    targetSftpId: "sftp-jms",
+  });
+
+  assert.equal(terminalWorkerManager.requests[0].payload.sftpUploadStrategy, "sequential");
+  assert.equal(terminalWorkerManager.requests[1].payload.sftpUploadStrategy, "sequential");
+  assert.equal(terminalWorkerManager.requests[2].payload.targetUploadStrategy, "sequential");
+
+  ipcMain.listeners.get("netcatty:close")(fakeEvent, { sessionId: "ssh-deep-link" });
+  assert.equal(sftpUploadStrategyRegistry.getSessionStrategy("ssh-deep-link"), undefined);
+
+  await ipcMain.handlers.get("netcatty:sftp:close")(fakeEvent, { sftpId: "sftp-jms" });
+  await ipcMain.handlers.get("netcatty:transfer:start")(fakeEvent, {
+    transferId: "transfer-after-close",
+    sourceType: "local",
+    targetType: "sftp",
+    targetSftpId: "sftp-jms",
+  });
+  assert.equal(terminalWorkerManager.requests[4].payload.targetUploadStrategy, undefined);
+});
+
+test("terminal worker mode leaves ordinary SSH-backed SFTP uploads unmarked", async () => {
+  const ipcMain = createFakeIpcMain();
+  const terminalWorkerManager = createFakeWorkerManager();
+  terminalWorkerManager.request = function request(channel, payload, options) {
+    this.requests.push({ channel, payload, options });
+    if (channel === "netcatty:sftp:openForSession") {
+      return Promise.resolve({ ok: true, sftpId: "sftp-ordinary" });
+    }
+    return Promise.resolve({ ok: true, channel });
+  };
+
+  sshBridge.registerHandlers(ipcMain, { terminalWorkerManager });
+  sftpBridge.registerHandlers(ipcMain, { terminalWorkerManager });
+  transferBridge.registerHandlers(ipcMain, { terminalWorkerManager });
+
+  await ipcMain.handlers.get("netcatty:start")(fakeEvent, {
+    sessionId: "ssh-ordinary",
+    username: "appuser",
+  });
+  await ipcMain.handlers.get("netcatty:sftp:openForSession")(fakeEvent, {
+    sessionId: "ssh-ordinary",
+  });
+  await ipcMain.handlers.get("netcatty:transfer:start")(fakeEvent, {
+    transferId: "transfer-ordinary",
+    sourceType: "local",
+    targetType: "sftp",
+    targetSftpId: "sftp-ordinary",
+  });
+
+  assert.equal(terminalWorkerManager.requests[1].payload.sftpUploadStrategy, undefined);
+  assert.equal(terminalWorkerManager.requests[2].payload.targetUploadStrategy, undefined);
 });
 
 test("terminal worker mode proxies system management requests", async () => {

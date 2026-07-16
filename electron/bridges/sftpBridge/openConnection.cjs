@@ -1,4 +1,13 @@
 /* eslint-disable no-undef */
+function resolveSessionSftpUploadStrategy(session) {
+  if (session?.sftpUploadStrategy === "sequential") return "sequential";
+  if (session?.conn?.__netcattySftpUploadStrategy === "sequential") return "sequential";
+  const username = session?._reuseEndpoint?.username || session?.username;
+  return typeof username === "string" && username.startsWith("JMS-")
+    ? "sequential"
+    : undefined;
+}
+
 function createOpenConnectionApi(ctx) {
   with (ctx) {
     const hasUsableProxy = (proxy) => {
@@ -526,6 +535,16 @@ function createOpenConnectionApi(ctx) {
      */
     async function openSftp(event, options) {
       const connId = options.sessionId || randomUUID();
+      const selectedJmsSession = Boolean(
+        options.sourceSessionId
+        && typeof options.username === "string"
+        && options.username.startsWith("JMS-"),
+      );
+      let selectedSessionUploadStrategy = options.sftpUploadStrategy === "sequential"
+        ? "sequential"
+        : (options.sourceSessionId
+          ? resolveSessionSftpUploadStrategy(sessions?.get(options.sourceSessionId))
+          : undefined) || (selectedJmsSession ? "sequential" : undefined);
 
       if (options.sourceSessionId && !options.sudo) {
         // reuseOnly: the caller named a specific live session (Connected picker).
@@ -544,6 +563,7 @@ function createOpenConnectionApi(ctx) {
                 username: options.username || "root",
               },
         );
+        selectedSessionUploadStrategy ||= resolveSessionSftpUploadStrategy(sourceSession);
         if (sourceSession?.conn && sourceSession?.connRef) {
           const refHolder = {
             id: connId,
@@ -555,7 +575,11 @@ function createOpenConnectionApi(ctx) {
           const reusedClient = createSessionBackedSftpClient(
             connId,
             sourceSession.conn,
-            { refHolder, sourceSessionId: options.sourceSessionId },
+            {
+              refHolder,
+              sourceSessionId: options.sourceSessionId,
+              sftpUploadStrategy: selectedSessionUploadStrategy,
+            },
           );
           try {
             sendSftpProgress(event.sender, connId, options.hostname, 'connecting', 'reusing terminal connection');
@@ -591,6 +615,7 @@ function createOpenConnectionApi(ctx) {
       }
 
       const client = new SftpClient();
+      client.__netcattySftpUploadStrategy = selectedSessionUploadStrategy;
     
       // Get default keys early to use for both chain and target
       const defaultKeys = await findAllDefaultPrivateKeysFromHelper();
@@ -958,4 +983,4 @@ function createOpenConnectionApi(ctx) {
   }
 }
 
-module.exports = { createOpenConnectionApi };
+module.exports = { createOpenConnectionApi, resolveSessionSftpUploadStrategy };

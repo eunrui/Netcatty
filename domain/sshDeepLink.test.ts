@@ -82,6 +82,7 @@ test("buildSshDeepLinkEphemeralHost includes password auth and disables mosh and
   assert.equal(ephemeral.etEnabled, false);
   assert.equal(ephemeral.protocol, "ssh");
   assert.equal(ephemeral.ephemeral, true);
+  assert.equal(ephemeral.sftpUploadStrategy, "sequential");
 });
 
 test("buildSshDeepLinkEphemeralHost omits password fields when target has no password", () => {
@@ -95,6 +96,7 @@ test("buildSshDeepLinkEphemeralHost omits password fields when target has no pas
   assert.equal(ephemeral.savePassword, false);
   assert.equal(ephemeral.moshEnabled, false);
   assert.equal(ephemeral.etEnabled, false);
+  assert.equal(ephemeral.sftpUploadStrategy, undefined);
 });
 
 test("buildSshDeepLinkEphemeralHostFromSaved keeps saved settings but overrides credentials", () => {
@@ -147,6 +149,7 @@ test("buildSshDeepLinkEphemeralHostFromSaved keeps saved settings but overrides 
   assert.equal(ephemeral.protocol, "ssh");
   assert.equal(ephemeral.moshEnabled, false);
   assert.equal(ephemeral.etEnabled, false);
+  assert.equal(ephemeral.sftpUploadStrategy, "sequential");
 });
 
 test("buildSshDeepLinkHostDraft never includes a password", () => {

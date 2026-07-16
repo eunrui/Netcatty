@@ -150,6 +150,8 @@ export interface Host {
   // Runtime hint for deep-link launches that target file transfer (e.g.
   // JumpServer sftp payloads): auto-open the SFTP side panel on connect.
   autoOpenSftpPanel?: boolean;
+  // Runtime compatibility hint for transports that require ordered SFTP writes.
+  sftpUploadStrategy?: 'sequential';
   password?: string;
   savePassword?: boolean; // Whether to save the password (default: true)
   authMethod?: 'password' | 'key' | 'certificate';
